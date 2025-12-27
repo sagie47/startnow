@@ -1,0 +1,570 @@
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import { useState } from 'react';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
+import { useBlocks } from '@/hooks/use-blocks';
+import { checkForDrift } from '@/utils/replan';
+import type { Block } from '@/utils/storage';
+
+type BlockType = 'Deep' | 'Admin' | 'Health' | 'Learning';
+
+const TYPE_COLORS: Record<BlockType, string> = {
+  Deep: '#FF6B6B',
+  Admin: '#4ECDC4',
+  Health: '#45B7D1',
+  Learning: '#FFA07A',
+};
+
+function DraggableBlock({
+  block,
+  index,
+  onEdit,
+  onComplete,
+  onReorder,
+}: {
+  block: Block;
+  index: number;
+  onEdit: () => void;
+  onComplete: () => void;
+  onReorder: (fromIndex: number, toIndex: number) => void;
+}) {
+  const translateY = useSharedValue(0);
+  const isDragging = useSharedValue(false);
+
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      isDragging.value = true;
+    })
+    .onUpdate((event) => {
+      translateY.value = event.translationY;
+    })
+    .onEnd(() => {
+      const toIndex = index + Math.round(translateY.value / 80);
+      const newIndex = Math.max(0, Math.min(block.fixed ? index : toIndex, index + 1));
+      
+      if (newIndex !== index) {
+        onReorder(index, newIndex);
+      }
+      
+      translateY.value = withSpring(0);
+      isDragging.value = false;
+    });
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: withSpring(isDragging.value ? 0.8 : 1),
+    zIndex: isDragging.value ? 1000 : 1,
+  }));
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={[animatedStyle]}>
+        <TouchableOpacity
+          style={[
+            styles.block,
+            block.fixed && styles.fixedBlock,
+            block.completed && styles.completedBlock
+          ]}
+          onPress={() => onComplete()}
+          onLongPress={() => !block.fixed && onEdit()}
+          activeOpacity={0.7}
+        >
+          <View style={styles.blockLeft}>
+            <Text style={styles.blockTime}>{block.startTime}</Text>
+            <View style={styles.durationBadge}>
+              <Text style={styles.durationText}>{block.duration}m</Text>
+            </View>
+          </View>
+          <View style={[
+            styles.blockContent,
+            { borderLeftColor: TYPE_COLORS[block.type as BlockType] }
+          ]}>
+            <Text style={[styles.blockTitle, block.completed && styles.completedTitle]}>
+              {block.title}
+            </Text>
+            <View style={styles.blockMeta}>
+              <Text style={styles.blockType}>{block.type}</Text>
+              {block.fixed && (
+                <View style={styles.fixedBadge}>
+                  <Ionicons name="lock-closed" size={12} color="#666" />
+                  <Text style={styles.fixedText}>Fixed</Text>
+                </View>
+              )}
+            </View>
+            {block.completed && (
+              <View style={styles.completedBadge}>
+                <Ionicons name="checkmark-circle" size={16} color="#4CAF50" />
+                <Text style={styles.completedText}>Complete</Text>
+              </View>
+            )}
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
+export default function TodayScreen() {
+  const router = useRouter();
+  const { blocks, loading, updateBlocks, stats } = useBlocks();
+  const [driftBlockId, setDriftBlockId] = useState<string | null>(null);
+
+  const handleAddBlock = () => {
+    router.push('/(modals)/add-block');
+  };
+
+  const handleBlockPress = (block: Block) => {
+    if (block.completed) return;
+    router.push({
+      pathname: '/(modals)/proof',
+      params: { block: JSON.stringify(block) }
+    });
+  };
+
+  const handleBlockLongPress = (block: Block) => {
+    if (block.fixed) return;
+    router.push({
+      pathname: '/(modals)/add-block',
+      params: { block: JSON.stringify(block) }
+    });
+  };
+
+  const handleReorder = (fromIndex: number, toIndex: number) => {
+    updateBlocks((prev) => {
+      const newBlocks = [...prev];
+      const [moved] = newBlocks.splice(fromIndex, 1);
+      newBlocks.splice(toIndex, 0, moved);
+      return newBlocks;
+    });
+  };
+
+  const handleReplan = () => {
+    router.push('/(modals)/replan');
+  };
+
+  const handleDrift = () => {
+    const driftedBlockId = checkForDrift(blocks);
+    if (driftedBlockId) {
+      setDriftBlockId(driftedBlockId);
+    }
+  };
+
+  useState(() => {
+    const interval = setInterval(handleDrift, 60000);
+    return () => clearInterval(interval);
+  });
+
+  const handleDriftAction = (action: 'skip' | 'shrink' | 'replan') => {
+    if (driftBlockId) {
+      const block = blocks.find(b => b.id === driftBlockId);
+      if (!block) return;
+
+      switch (action) {
+        case 'skip':
+          break;
+        case 'shrink':
+          updateBlocks((prev) => 
+            prev.map(b => b.id === block.id ? { ...b, duration: Math.round(b.duration * 0.6) } : b)
+          );
+          break;
+        case 'replan':
+          setDriftBlockId(null);
+          handleReplan();
+          return;
+        default:
+          break;
+      }
+    }
+    setDriftBlockId(null);
+  };</think>
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>TODAY</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <View>
+          <Text style={styles.headerTitle}>TODAY</Text>
+          <View style={styles.statsRow}>
+            <View style={styles.stat}>
+              <Text style={styles.statNumber}>{stats.done}</Text>
+              <Text style={styles.statLabel}>DONE</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.stat}>
+              <Text style={styles.statNumber}>{stats.planned}</Text>
+              <Text style={styles.statLabel}>TOTAL</Text>
+            </View>
+          </View>
+        </View>
+        <View style={styles.headerActions}>
+          <TouchableOpacity style={styles.replanButton} onPress={handleReplan}>
+            <Ionicons name="refresh" size={20} color="#000000" />
+            <Text style={styles.replanButtonText}>REPLAN</Text>
+          </TouchableOpacity>
+          <View style={styles.statusBadge}>
+            <View style={[styles.statusDot, { backgroundColor: '#4CAF50' }]} />
+            <Text style={styles.statusText}>On track</Text>
+          </View>
+        </View>
+      </View>
+
+      <ScrollView style={styles.timeline} showsVerticalScrollIndicator={false}>
+        {blocks.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="calendar-outline" size={48} color="#CCCCCC" />
+            <Text style={styles.emptyTitle}>No blocks yet</Text>
+            <Text style={styles.emptySubtitle}>Tap + to add your first block</Text>
+          </View>
+        ) : (
+          blocks.map((block, index) => (
+            <DraggableBlock
+              key={block.id}
+              block={block}
+              index={index}
+              onEdit={() => handleBlockLongPress(block)}
+              onComplete={() => handleBlockPress(block)}
+              onReorder={handleReorder}
+            />
+          ))
+        )}
+      </ScrollView>
+
+      <TouchableOpacity style={styles.fab} onPress={handleAddBlock}>
+        <Ionicons name="add" size={32} color="#FFFFFF" />
+      </TouchableOpacity>
+
+      {driftBlockId && (
+        <Modal
+          visible={!!driftBlockId}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setDriftBlockId(null)}
+        >
+          <View style={styles.driftModalContainer}>
+            <View style={styles.driftModal}>
+              <View style={styles.driftHeader}>
+                <Ionicons name="alert-circle" size={24} color="#FF5252" />
+                <Text style={styles.driftTitle}>Block Behind Schedule</Text>
+              </View>
+              <View style={styles.driftActions}>
+                <TouchableOpacity
+                  style={styles.driftActionButton}
+                  onPress={() => handleDriftAction('skip')}
+                >
+                  <Ionicons name="close-circle" size={20} color="#FF5252" />
+                  <Text style={styles.driftActionText}>Skip</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.driftActionButton}
+                  onPress={() => handleDriftAction('shrink')}
+                >
+                  <Ionicons name="contract" size={20} color="#FFA000" />
+                  <Text style={styles.driftActionText}>Shrink</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.driftActionButton, styles.driftActionPrimary]}
+                  onPress={() => handleDriftAction('replan')}
+                >
+                  <Ionicons name="refresh" size={20} color="#FFFFFF" />
+                  <Text style={[styles.driftActionText, styles.driftActionTextPrimary]}>Replan</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity
+                style={styles.driftClose}
+                onPress={() => setDriftBlockId(null)}
+              >
+                <Text style={styles.driftCloseText}>Continue as-is</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: '#E0E0E0',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 2,
+    color: '#000000',
+    marginBottom: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  stat: {
+    alignItems: 'flex-start',
+  },
+  statNumber: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+    lineHeight: 22,
+  },
+  statLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1,
+    color: '#666666',
+  },
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E0E0E0',
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 0,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  replanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#000000',
+  },
+  replanButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1,
+    color: '#FFFFFF',
+  },
+  driftModalContainer: {
+    flex:1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  driftModal: {
+    backgroundColor: '#FFFFFF',
+    borderTopWidth: 2,
+    borderTopColor: '#000000',
+    padding: 24,
+  },
+  driftHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 20,
+  },
+  driftTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  driftActions: {
+    gap: 12,
+    marginBottom: 20,
+  },
+  driftActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 2,
+    borderColor: '#E0E0E0',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+  },
+  driftActionPrimary: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  driftActionText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  driftActionTextPrimary: {
+    color: '#FFFFFF',
+  },
+  driftClose: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  driftCloseText: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  timeline: {
+    flex: 1,
+    padding: 16,
+  },
+  block: {
+    flexDirection: 'row',
+    marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 0,
+  },
+  fixedBlock: {
+    backgroundColor: '#F5F5F5',
+  },
+  completedBlock: {
+    opacity: 0.6,
+  },
+  blockLeft: {
+    width: 70,
+    padding: 12,
+    borderRightWidth: 2,
+    borderRightColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  blockTime: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 4,
+  },
+  durationBadge: {
+    backgroundColor: '#000000',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  durationText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  blockContent: {
+    flex: 1,
+    padding: 12,
+    borderLeftWidth: 4,
+  },
+  blockTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000000',
+    marginBottom: 6,
+  },
+  completedTitle: {
+    textDecorationLine: 'line-through',
+  },
+  blockMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  blockType: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#666666',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  fixedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  fixedText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  completedBadge: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  completedText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666666',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    gap: 12,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#000000',
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#666666',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 0,
+  },
+});
