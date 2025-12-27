@@ -4,14 +4,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useBlocks } from '@/hooks/use-blocks';
 import { useAI } from '@/hooks/use-ai';
-import { useConstraints } from '@/hooks/use-constraints';
 import { generateDebrief, buildGenerateDebriefInput, validateDebriefResponse } from '@/services/debrief';
 import { mapDebriefToStorage, saveDebrief, getDebriefForDate } from '@/utils/storage';
-import type { Block } from '@/utils/storage';
 
 export default function DebriefModal() {
   const router = useRouter();
-  const { blocks, updateBlocks } = useBlocks();
+  const { blocks } = useBlocks();
   const { isEnabled: aiEnabled } = useAI();
   const [loading, setLoading] = useState(true);
   const [aiLoading, setAiLoading] = useState(false);
@@ -190,7 +188,7 @@ export default function DebriefModal() {
           {displayDebrief && (
             <>
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>TOMORROW'S RULE</Text>
+                <Text style={styles.sectionTitle}>TOMORROW&apos;S RULE</Text>
                 <View style={styles.ruleCard}>
                   <Text style={styles.ruleText}>{displayDebrief.outputs.tomorrowRule}</Text>
                 </View>
