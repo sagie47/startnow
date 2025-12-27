@@ -8,6 +8,8 @@ export type GenerateDebriefInput = {
   skippedBlocks: number;
   shrunkBlocks: number;
   driftMinutes: number;
+  plannedMinutes: number;
+  doneMinutes: number;
   dayStart?: string;
   dayEnd?: string;
 };
@@ -15,11 +17,11 @@ export type GenerateDebriefInput = {
 export function buildGenerateDebriefInput(args: {
   plannedCount: number;
   doneCount: number;
+  plannedMinutes: number;
+  doneMinutes: number;
   skippedCount: number;
   shrunkCount: number;
   driftMinutes: number;
-  plannedMinutes: number;
-  doneMinutes: number;
   dayStart?: string;
   dayEnd?: string;
 }): GenerateDebriefInput {
@@ -29,15 +31,16 @@ export function buildGenerateDebriefInput(args: {
     skippedBlocks: args.skippedCount,
     shrunkBlocks: args.shrunkCount,
     driftMinutes: args.driftMinutes,
+    plannedMinutes: args.plannedMinutes,
+    doneMinutes: args.doneMinutes,
     dayStart: args.dayStart,
     dayEnd: args.dayEnd,
   };
 }
 
-export async function generateDebrief(
-  input: GenerateDebriefInput
-): Promise<DebriefResponse> {
-  const prompt = `You are a debrief assistant that reviews daily execution and sets tomorrow's rule.
+export const generateDebrief = (function() {
+  return async function(input: GenerateDebriefInput): Promise<DebriefResponse> {
+    const prompt = `You are a debrief assistant that reviews daily execution and sets tomorrow's rule.
   
 CONSTRAINTS-FIRST APPROACH:
 - You never flatter or hype
@@ -89,62 +92,64 @@ RULES:
 8. keepDoing: single win like "started with Deep work" or "used time blocking"
 9. Always respond in valid JSON`;
 
-  const response = await callGemini(prompt);
-  return parseGeminiJSON<DebriefResponse>(response);
-}
-
-export function validateDebriefResponse(
-  response: Partial<DebriefResponse>
-): DebriefResponse {
-  const validated: DebriefResponse = {
-    streakStatus: response.streakStatus || 'maintained',
-    blocksCompleted: response.blocksCompleted || 0,
-    blocksPlanned: response.blocksPlanned || 0,
-    completionPercent: Math.max(0, Math.min(100, response.completionPercent || 0)),
-    tomorrowRule: response.tomorrowRule || '',
-    oneChange: response.oneChange || '',
-    keepDoing: response.keepDoing || '',
-    insights: Array.isArray(response.insights) ? response.insights.slice(0, 5) : [],
-    recommendations: Array.isArray(response.recommendations) ? response.recommendations.slice(0, 3) : [],
+    const response = await callGemini(prompt);
+    return parseGeminiJSON<DebriefResponse>(response);
   };
+}());
 
-  if (!validated.tomorrowRule || validated.tomorrowRule.length < 8 || validated.tomorrowRule.length > 140) {
-    if (validated.completionPercent < 50) {
-      validated.tomorrowRule = "Protect one block and finish it before adding anything else.";
-    } else {
-      validated.tomorrowRule = "Repeat today's first win earlier tomorrow.";
+export const validateDebriefResponse = (function() {
+  return function(response: Partial<DebriefResponse>): DebriefResponse {
+    const validated: DebriefResponse = {
+      streakStatus: response.streakStatus || 'maintained',
+      blocksCompleted: response.blocksCompleted || 0,
+      blocksPlanned: response.blocksPlanned || 0,
+      completionPercent: Math.max(0, Math.min(100, response.completionPercent || 0)),
+      tomorrowRule: response.tomorrowRule || '',
+      oneChange: response.oneChange || '',
+      keepDoing: response.keepDoing || '',
+      insights: Array.isArray(response.insights) ? response.insights.slice(0, 5) : [],
+      recommendations: Array.isArray(response.recommendations) ? response.recommendations.slice(0, 3) : [],
+    };
+
+    if (!validated.tomorrowRule || validated.tomorrowRule.length < 8 || validated.tomorrowRule.length > 140) {
+      if (validated.completionPercent < 50) {
+        validated.tomorrowRule = "Protect one block and finish it before adding anything else.";
+      } else {
+        validated.tomorrowRule = "Repeat today's first win earlier tomorrow.";
+      }
     }
-  }
 
-  if (!validated.oneChange || validated.oneChange.length < 6 || validated.oneChange.length > 120) {
-    validated.oneChange = "Shrink the first Admin block by 10 minutes.";
-  }
+    if (!validated.oneChange || validated.oneChange.length < 6 || validated.oneChange.length > 120) {
+      validated.oneChange = "Shrink the first Admin block by 10 minutes.";
+    }
 
-  if (!validated.keepDoing || validated.keepDoing.length < 6 || validated.keepDoing.length > 120) {
-    validated.keepDoing = "Keep starting with a Deep block.";
-  }
+    if (!validated.keepDoing || validated.keepDoing.length < 6 || validated.keepDoing.length > 120) {
+      validated.keepDoing = "Keep starting with a Deep block.";
+    }
 
-  validated.recommendations = validated.recommendations.map(rec => ({
-    ...rec,
-    priority: rec.priority === 'high' || rec.priority === 'medium' || rec.priority === 'low' ? rec.priority : 'medium',
-  }));
+    validated.recommendations = validated.recommendations.map(rec => ({
+      ...rec,
+      priority: rec.priority === 'high' || rec.priority === 'medium' || rec.priority === 'low' ? rec.priority : 'medium',
+    }));
 
-  return validated;
-}
+    return validated;
+  };
+}());
 
-export function analyzeDay(args: {
-  date: string;
-  plannedCount: number;
-  doneCount: number;
-  plannedMinutes: number;
-  doneMinutes: number;
-  skippedCount: number;
-  shrunkCount: number;
-  driftMinutes: number;
-  dayStart?: string;
-  dayEnd?: string;
-}): Promise<DebriefResponse> {
-  const prompt = `You are an AI coach analyzing today's execution.
+export const analyzeDay = (function() {
+  return async function(args: {
+    date: string;
+    plannedCount: number;
+    doneCount: number;
+    plannedMinutes: number;
+    doneMinutes: number;
+    skippedCount: number;
+    shrunkCount: number;
+    driftMinutes: number;
+    dayStart?: string;
+    dayEnd?: string;
+  }): Promise<DebriefResponse> {
+    const prompt = `You are an AI coach analyzing today's execution.
   
 DAY'S DATA:
 - Date: ${args.date}
@@ -178,23 +183,25 @@ RULES:
 5. No fluff: direct, specific, actionable
 6. Always respond in valid JSON`;
 
-  const response = await callGemini(prompt);
-  return parseGeminiJSON<DebriefResponse>(response);
-}
+    const response = await callGemini(prompt);
+    return parseGeminiJSON<DebriefResponse>(response);
+  };
+}());
 
-export function planTomorrow(args: {
-  date: string;
-  plannedCount: number;
-  doneCount: number;
-  plannedMinutes: number;
-  doneMinutes: number;
-  skippedCount: number;
-  shrunkCount: number;
-  driftMinutes: number;
-  dayStart?: string;
-  dayEnd?: string;
-}): Promise<DebriefResponse> {
-  const prompt = `You are an AI coach planning tomorrow based on today's execution.
+export const planTomorrow = (function() {
+  return async function(args: {
+    date: string;
+    plannedCount: number;
+    doneCount: number;
+    plannedMinutes: number;
+    doneMinutes: number;
+    skippedCount: number;
+    shrunkCount: number;
+    driftMinutes: number;
+    dayStart?: string;
+    dayEnd?: string;
+  }): Promise<DebriefResponse> {
+    const prompt = `You are an AI coach planning tomorrow based on today's execution.
   
 DAY'S DATA:
 - Date: ${args.date}
@@ -227,15 +234,17 @@ RULES:
 5. No fluff: direct, specific, actionable
 6. Always respond in valid JSON`;
 
-  const response = await callGemini(prompt);
-  return parseGeminiJSON<DebriefResponse>(response);
-}
+    const response = await callGemini(prompt);
+    return parseGeminiJSON<DebriefResponse>(response);
+  };
+}());
 
-export function coachReply(args: {
-  input: string;
-  date: string;
-}): Promise<DebriefResponse> {
-  const prompt = `You are an AI coach answering a user question.
+export const coachReply = (function() {
+  return async function(args: {
+    input: string;
+    date: string;
+  }): Promise<DebriefResponse> {
+    const prompt = `You are an AI coach answering a user question.
   
 USER INPUT:
 "${args.input}"
@@ -259,9 +268,10 @@ RULES:
 5. If the question is about motivation, be supportive but realistic
 6. Always respond in valid JSON`;
 
-  const response = await callGemini(prompt);
-  return parseGeminiJSON<DebriefResponse>(response);
-}
+    const response = await callGemini(prompt);
+    return parseGeminiJSON<DebriefResponse>(response);
+  };
+}());
 
 export function mapDebriefToStorage(args: {
   date: string;
