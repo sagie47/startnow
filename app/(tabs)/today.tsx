@@ -214,6 +214,9 @@ export default function TodayScreen() {
             <Ionicons name="refresh" size={20} color="#FFFFFF" />
             <Text style={styles.replanButtonText}>REPLAN</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.replanButton} onPress={() => router.push('/(modals)/debrief')}>
+            <Text style={styles.replanButtonText}>DEBRIEF</Text>
+          </TouchableOpacity>
           <View style={styles.statusBadge}>
             <View style={[styles.statusDot, { backgroundColor: '#4CAF50' }]} />
             <Text style={styles.statusText}>On track</Text>
