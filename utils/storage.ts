@@ -6,6 +6,8 @@ const BLOCKS_KEY = '@rocket_blocks';
 const PROOFS_KEY = '@rocket_proofs';
 const SETTINGS_KEY = '@rocket_settings';
 const CONSTRAINTS_KEY = '@rocket_constraints';
+const DEBRIEFS_KEY = '@rocket_debriefs';
+const GOALS_KEY = '@rocket_goals';
 
 export interface Block {
   id: string;
@@ -41,6 +43,43 @@ export interface UserSettings {
   timezone: string;
   weekStart: 'sunday' | 'monday';
   schemaVersion: string;
+}
+
+export interface Debrief {
+  date: string;
+  createdAt: number;
+  inputs: {
+    plannedCount: number;
+    doneCount: number;
+    plannedMinutes: number;
+    doneMinutes: number;
+    driftMinutes: number;
+    skippedCount: number;
+    shrunkCount: number;
+  };
+  outputs: {
+    tomorrowRule: string;
+    oneChange: string;
+    keepDoing: string;
+    insights: string[];
+    recommendations: Array<{
+      title: string;
+      action: string;
+      priority: 'high' | 'medium' | 'low';
+    }>;
+    completionPercent: number;
+    streakStatus?: 'maintained' | 'broken';
+    blocksPlanned?: number;
+    blocksCompleted?: number;
+  };
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  createdAt: number;
+  selectedVariant?: 'mvg' | 'standard' | 'aggressive';
+  blocks: Block[];
 }
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -309,6 +348,75 @@ export interface DebriefResponse {
   encouragement: string;
 }
 
+export async function loadDebriefs(): Promise<Debrief[]> {
+  try {
+    const data = await AsyncStorage.getItem(DEBRIEFS_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Failed to load debriefs:', error);
+    return [];
+  }
+}
+
+export async function saveDebrief(debrief: Debrief): Promise<void> {
+  try {
+    const debriefs = await loadDebriefs();
+    const existingIndex = debriefs.findIndex(d => d.date === debrief.date);
+    
+    if (existingIndex >= 0) {
+      debriefs[existingIndex] = debrief;
+    } else {
+      debriefs.push(debrief);
+    }
+    
+    await AsyncStorage.setItem(DEBRIEFS_KEY, JSON.stringify(debriefs));
+  } catch (error) {
+    console.error('Failed to save debrief:', error);
+  }
+}
+
+export async function getDebriefForDate(date: string): Promise<Debrief | null> {
+  try {
+    const debriefs = await loadDebriefs();
+    return debriefs.find(d => d.date === date) || null;
+  } catch (error) {
+    console.error('Failed to get debrief for date:', error);
+    return null;
+  }
+}
+
+export async function loadGoals(): Promise<Goal[]> {
+  try {
+    const data = await AsyncStorage.getItem(GOALS_KEY);
+    return data ? JSON.parse(data) : [];
+  } catch (error) {
+    console.error('Failed to load goals:', error);
+    return [];
+  }
+}
+
+export async function saveGoal(goal: Goal): Promise<void> {
+  try {
+    const goals = await loadGoals();
+    goals.push(goal);
+    await AsyncStorage.setItem(GOALS_KEY, JSON.stringify(goals));
+  } catch (error) {
+    console.error('Failed to save goal:', error);
+  }
+}
+
+export async function updateGoal(goalId: string, updates: Partial<Goal>): Promise<void> {
+  try {
+    const goals = await loadGoals();
+    const updatedGoals = goals.map(g => 
+      g.id === goalId ? { ...g, ...updates } : g
+    );
+    await AsyncStorage.setItem(GOALS_KEY, JSON.stringify(updatedGoals));
+  } catch (error) {
+    console.error('Failed to update goal:', error);
+  }
+}
+
 export async function clearAll(): Promise<void> {
   try {
     await AsyncStorage.multiRemove([
@@ -316,8 +424,38 @@ export async function clearAll(): Promise<void> {
       PROOFS_KEY,
       SETTINGS_KEY,
       CONSTRAINTS_KEY,
+      DEBRIEFS_KEY,
+      GOALS_KEY,
     ]);
   } catch (error) {
     console.error('Failed to clear storage:', error);
   }
+}
+
+export function mapDebriefToStorage(args: {
+  date: string;
+  createdAt: number;
+  inputs: Debrief["inputs"];
+  ai: any;
+}): Debrief {
+  const completionPercent = Math.round(
+    (args.inputs.doneMinutes / Math.max(1, args.inputs.plannedMinutes)) * 100
+  );
+
+  return {
+    date: args.date,
+    createdAt: args.createdAt,
+    inputs: args.inputs,
+    outputs: {
+      tomorrowRule: args.ai.tomorrowRule || '',
+      oneChange: args.ai.oneChange || '',
+      keepDoing: args.ai.keepDoing || '',
+      insights: args.ai.insights || [],
+      recommendations: args.ai.recommendations || [],
+      completionPercent,
+      streakStatus: args.ai.streakStatus || 'maintained',
+      blocksPlanned: args.ai.blocksPlanned ?? args.inputs.plannedCount,
+      blocksCompleted: args.ai.blocksCompleted ?? args.inputs.doneCount,
+    },
+  };
 }

@@ -60,6 +60,8 @@ export interface DebriefResponse {
   blocksPlanned: number;
   completionPercent: number;
   tomorrowRule: string;
+  oneChange: string;
+  keepDoing: string;
   insights: string[];
   recommendations: {
     title: string;
